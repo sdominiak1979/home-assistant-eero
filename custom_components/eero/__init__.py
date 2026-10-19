@@ -84,6 +84,11 @@ from .const import (
     SERVICE_LIST_RESERVATIONS,
     SERVICE_INSPECT_CLIENT,
     ATTR_MAC,
+    ATTR_IP,
+    ATTR_DESCRIPTION,
+    ATTR_URL,
+    SERVICE_CREATE_RESERVATION,
+    SERVICE_DELETE_RESERVATION,
 )
 
 LIST_RESERVATIONS_SCHEMA = vol.Schema(
@@ -97,6 +102,26 @@ LIST_RESERVATIONS_SCHEMA = vol.Schema(
 INSPECT_CLIENT_SCHEMA = vol.Schema(
     {
         vol.Required(ATTR_MAC): cv.string,
+        vol.Optional(ATTR_TARGET_NETWORK, default=[]): vol.All(
+            cv.ensure_list, [cv.string]
+        ),
+    }
+)
+
+CREATE_RESERVATION_SCHEMA = vol.Schema(
+    {
+        vol.Required(ATTR_MAC): cv.string,
+        vol.Required(ATTR_IP): cv.string,
+        vol.Optional(ATTR_DESCRIPTION): cv.string,
+        vol.Optional(ATTR_TARGET_NETWORK, default=[]): vol.All(
+            cv.ensure_list, [cv.string]
+        ),
+    }
+)
+
+DELETE_RESERVATION_SCHEMA = vol.Schema(
+    {
+        vol.Required(ATTR_URL): cv.string,
         vol.Optional(ATTR_TARGET_NETWORK, default=[]): vol.All(
             cv.ensure_list, [cv.string]
         ),
@@ -594,6 +619,58 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> b
         SERVICE_INSPECT_CLIENT,
         async_inspect_client,
         schema=INSPECT_CLIENT_SCHEMA,
+        supports_response=SupportsResponse.ONLY,
+    )
+
+    async def async_create_reservation(service: ServiceCall) -> ServiceResponse:
+        mac = service.data[ATTR_MAC].lower().replace("-", ":")
+        result = []
+        for network in _validate_network(
+            target_network=service.data[ATTR_TARGET_NETWORK]
+        ):
+            try:
+                data = await hass.async_add_executor_job(
+                    network.create_reservation,
+                    mac,
+                    service.data[ATTR_IP],
+                    service.data.get(ATTR_DESCRIPTION),
+                )
+                error = None
+            except EeroException as err:
+                data, error = None, str(err)
+            result.append({"network": network.name, "error": error, "response": data})
+        return {"results": result}
+
+    async def async_delete_reservation(service: ServiceCall) -> ServiceResponse:
+        url = service.data[ATTR_URL]
+        result = []
+        for network in _validate_network(
+            target_network=service.data[ATTR_TARGET_NETWORK]
+        ):
+            if not url.startswith(network.url_reservations):
+                continue
+            try:
+                data = await hass.async_add_executor_job(
+                    network.delete_reservation, url
+                )
+                error = None
+            except EeroException as err:
+                data, error = None, str(err)
+            result.append({"network": network.name, "error": error, "response": data})
+        return {"results": result}
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_CREATE_RESERVATION,
+        async_create_reservation,
+        schema=CREATE_RESERVATION_SCHEMA,
+        supports_response=SupportsResponse.ONLY,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_DELETE_RESERVATION,
+        async_delete_reservation,
+        schema=DELETE_RESERVATION_SCHEMA,
         supports_response=SupportsResponse.ONLY,
     )
 

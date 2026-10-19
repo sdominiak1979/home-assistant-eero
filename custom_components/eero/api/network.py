@@ -968,3 +968,16 @@ class EeroNetwork(EeroResource):
     def get_devices_raw(self):
         """Read the raw client device list of this network (read-only)."""
         return self.api.call(method=METHOD_GET, url=f"{self.url}/devices")
+
+    # --- sdominiak1979 fork additions (reservation writes) ---
+
+    def create_reservation(self, mac: str, ip: str, description: str | None = None):
+        """Create a DHCP reservation (MAC -> IP)."""
+        payload = {"mac": mac, "ip": ip}
+        if description:
+            payload["description"] = description
+        return self.api.call(method=METHOD_POST, url=self.url_reservations, json=payload)
+
+    def delete_reservation(self, url: str):
+        """Delete a DHCP reservation by its URL (as returned by get_reservations)."""
+        return self.api.call(method=METHOD_DELETE, url=url)

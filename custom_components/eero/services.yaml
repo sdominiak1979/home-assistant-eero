@@ -25,3 +25,27 @@ inspect_client:
     target_network:
       required: False
       example: My Network or 1234567
+
+create_reservation:
+  fields:
+    mac:
+      required: True
+      example: "80:64:7c:e4:a0:8a"
+    ip:
+      required: True
+      example: "192.168.4.52"
+    description:
+      required: False
+      example: Deck Light Strp
+    target_network:
+      required: False
+      example: My Network or 1234567
+
+delete_reservation:
+  fields:
+    url:
+      required: True
+      example: /2.2/networks/1234567/reservations/abcdef
+    target_network:
+      required: False
+      example: My Network or 1234567
