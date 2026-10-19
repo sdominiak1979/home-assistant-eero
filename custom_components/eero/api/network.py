@@ -1012,20 +1012,43 @@ class EeroNetwork(EeroResource):
 
     @property
     def network_map_offline(self) -> list[dict]:
-        """Known but not-connected clients, most recently seen first (capped at 200)."""
-        rows = []
-        for client in self.clients:
-            if client.connected:
-                continue
+        """Known but not-connected clients, most recently seen first (capped at 300).
+
+        The network /devices list only covers roughly the last week; profile device
+        lists keep older devices (e.g. someone away for weeks), so merge those in.
+        """
+        rows = {}
+        connected = {str(c.mac).lower() for c in self.clients if c.connected}
+
+        def add(client, profile_name=None):
+            mac = str(client.mac).lower()
+            if not mac or mac in connected:
+                return
             last = client.last_active
-            rows.append(
-                {
+            row = rows.get(mac)
+            seen = last.isoformat() if last else None
+            if row is None:
+                rows[mac] = {
                     "name": client.name,
                     "ip": client.ip,
                     "mac": client.mac,
                     "eero": client.source_location,
-                    "last_seen": last.isoformat() if last else None,
+                    "profile": profile_name,
+                    "last_seen": seen,
                 }
-            )
-        rows.sort(key=lambda r: r["last_seen"] or "", reverse=True)
-        return rows[:200]
+            else:
+                if profile_name and not row.get("profile"):
+                    row["profile"] = profile_name
+                if seen and (not row["last_seen"] or seen > row["last_seen"]):
+                    row["last_seen"] = seen
+
+        for client in self.clients:
+            if not client.connected:
+                add(client)
+        for profile in self.profiles:
+            for client in profile.clients:
+                if client.data.get("connected"):
+                    continue
+                add(client, profile.name)
+        out = sorted(rows.values(), key=lambda r: r["last_seen"] or "", reverse=True)
+        return out[:300]
