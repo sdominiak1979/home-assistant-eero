@@ -782,12 +782,22 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> b
             await archive_store.async_save(archive)
             # eero has no API (and no app option) to delete/forget a device.
             # Instead unassign it from its profile, then read it back to verify.
-            url = f"/2.3/networks/{network.id}/devices/{mac.replace(':', '')}"
-            error = None
-            try:
-                await hass.async_add_executor_job(
-                    lambda: network.api.call(method="PUT", url=url, json={"profile": None})
+            # "Unassigned" is a real eero profile (that's what the app does).
+            unassigned = next((p.data.get("url") for p in network.profiles
+                               if p.name == "Unassigned"), None)
+            if not unassigned:
+                profiles = await hass.async_add_executor_job(
+                    lambda: network.api.call(method="GET", url=f"{network.url}/profiles")
                 )
+                unassigned = next((p.get("url") for p in (profiles or [])
+                                   if p.get("name") == "Unassigned"), None)
+            url = f"{network.url}/devices/{mac.replace(':', '')}"
+            error = None if unassigned else "no Unassigned profile found"
+            try:
+                if unassigned:
+                    await hass.async_add_executor_job(
+                        lambda: network.api.call(method="PUT", url=url, json={"profile": unassigned})
+                    )
             except EeroException as err:
                 error = str(err)
             after = None
@@ -802,7 +812,7 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> b
                            "error": error,
                            "blocked": (after or {}).get("blacklisted") if isinstance(after, dict) else None,
                            "profile_after": profile_after,
-                           "unassigned": error is None and not profile_after})
+                           "unassigned": error is None and (profile_after or {}).get("name") == "Unassigned"})
         await coordinator.async_request_refresh()
         return {"results": result}
 
