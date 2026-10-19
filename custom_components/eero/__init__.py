@@ -156,7 +156,7 @@ MAC_SCHEMA = vol.Schema(
 
 API_CALL_SCHEMA = vol.Schema(
     {
-        vol.Required("method"): vol.In(["GET", "PUT", "POST"]),
+        vol.Required("method"): vol.In(["GET", "PUT", "POST", "DELETE"]),
         vol.Required("path"): cv.string,
         vol.Optional("json"): dict,
         vol.Optional(ATTR_TARGET_NETWORK, default=[]): vol.All(
@@ -881,7 +881,7 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> b
         return result
 
     async def async_api_call(service: ServiceCall) -> ServiceResponse:
-        """Diagnostic: raw GET/PUT/POST, limited to this network's own paths. No DELETE."""
+        """Diagnostic: raw GET/PUT/POST within this network; DELETE only on blacklist (unblock) entries."""
         out = []
         for network in _validate_network(
             target_network=service.data[ATTR_TARGET_NETWORK]
@@ -889,6 +889,9 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> b
             path = service.data["path"]
             if f"/networks/{network.id}/" not in path + "/":
                 out.append({"network": network.name, "error": "path must be inside this network"})
+                continue
+            if service.data["method"] == "DELETE" and f"/networks/{network.id}/blacklist/" not in path:
+                out.append({"network": network.name, "error": "DELETE only allowed on blacklist entries"})
                 continue
             try:
                 resp = await hass.async_add_executor_job(
