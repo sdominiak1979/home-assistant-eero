@@ -154,6 +154,17 @@ MAC_SCHEMA = vol.Schema(
     }
 )
 
+API_CALL_SCHEMA = vol.Schema(
+    {
+        vol.Required("method"): vol.In(["GET", "PUT", "POST"]),
+        vol.Required("path"): cv.string,
+        vol.Optional("json"): dict,
+        vol.Optional(ATTR_TARGET_NETWORK, default=[]): vol.All(
+            cv.ensure_list, [cv.string]
+        ),
+    }
+)
+
 SET_BLOCKED_APPS_SCHEMA = vol.Schema(
     {
         vol.Required(ATTR_BLOCKED_APPS): vol.All(
@@ -846,6 +857,32 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> b
                 result["steps"].append({"network": network.name, "error": str(err)})
         await coordinator.async_request_refresh()
         return result
+
+    async def async_api_call(service: ServiceCall) -> ServiceResponse:
+        """Diagnostic: raw GET/PUT/POST, limited to this network's own paths. No DELETE."""
+        out = []
+        for network in _validate_network(
+            target_network=service.data[ATTR_TARGET_NETWORK]
+        ):
+            path = service.data["path"]
+            if f"/networks/{network.id}/" not in path + "/":
+                out.append({"network": network.name, "error": "path must be inside this network"})
+                continue
+            try:
+                resp = await hass.async_add_executor_job(
+                    lambda: network.api.call(method=service.data["method"], url=path,
+                                             json=service.data.get("json"))
+                )
+                out.append({"network": network.name, "response": resp})
+            except EeroException as err:
+                out.append({"network": network.name, "error": str(err),
+                            "detail": getattr(err, "payload", None) or getattr(err, "message", None)})
+        return {"results": out}
+
+    hass.services.async_register(
+        DOMAIN, "api_call", async_api_call, schema=API_CALL_SCHEMA,
+        supports_response=SupportsResponse.ONLY,
+    )
 
     for name, func in (
         (SERVICE_REMOVE_CLIENT, async_remove_client),
