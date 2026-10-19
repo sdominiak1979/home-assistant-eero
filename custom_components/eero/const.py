@@ -88,6 +88,9 @@ RELEASE_URL = (
 )
 
 SERVICE_SET_BLOCKED_APPS = "set_blocked_apps"
+SERVICE_LIST_RESERVATIONS = "list_reservations"
+SERVICE_INSPECT_CLIENT = "inspect_client"
+ATTR_MAC = "mac"
 
 CONF_MISCELLANEOUS = "miscellaneous"
 CONF_PREFIX_NETWORK_NAME = "prefix_network_name"

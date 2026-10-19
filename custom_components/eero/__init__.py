@@ -13,7 +13,7 @@ import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_NAME, CONF_SCAN_INTERVAL, Platform
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
 from homeassistant.helpers import (
     config_validation as cv,
     device_registry as dr,
@@ -81,6 +81,26 @@ from .const import (
     MODEL_NETWORK,
     MODEL_PROFILE,
     SERVICE_SET_BLOCKED_APPS,
+    SERVICE_LIST_RESERVATIONS,
+    SERVICE_INSPECT_CLIENT,
+    ATTR_MAC,
+)
+
+LIST_RESERVATIONS_SCHEMA = vol.Schema(
+    {
+        vol.Optional(ATTR_TARGET_NETWORK, default=[]): vol.All(
+            cv.ensure_list, [cv.string]
+        ),
+    }
+)
+
+INSPECT_CLIENT_SCHEMA = vol.Schema(
+    {
+        vol.Required(ATTR_MAC): cv.string,
+        vol.Optional(ATTR_TARGET_NETWORK, default=[]): vol.All(
+            cv.ensure_list, [cv.string]
+        ),
+    }
 )
 
 SET_BLOCKED_APPS_SCHEMA = vol.Schema(
@@ -516,6 +536,66 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> b
             async_set_blocked_apps,
             schema=SET_BLOCKED_APPS_SCHEMA,
         )
+
+    # --- sdominiak1979 fork additions (read-only diagnostics) ---
+    async def async_list_reservations(service: ServiceCall) -> ServiceResponse:
+        result = []
+        for network in _validate_network(
+            target_network=service.data[ATTR_TARGET_NETWORK]
+        ):
+            try:
+                data = await hass.async_add_executor_job(network.get_reservations)
+                error = None
+            except EeroException as err:
+                data, error = None, str(err)
+            result.append(
+                {
+                    "network": network.name,
+                    "url": network.url_reservations,
+                    "network_data_keys": sorted(network.data.keys()),
+                    "error": error,
+                    "reservations": data,
+                }
+            )
+        return {"networks": result}
+
+    async def async_inspect_client(service: ServiceCall) -> ServiceResponse:
+        mac = service.data[ATTR_MAC].lower().replace("-", ":")
+        result = []
+        for network in _validate_network(
+            target_network=service.data[ATTR_TARGET_NETWORK]
+        ):
+            devices = await hass.async_add_executor_job(network.get_devices_raw)
+            for device in devices or []:
+                if str(device.get("mac", "")).lower() == mac:
+                    result.append(
+                        {
+                            "network": network.name,
+                            "keys": sorted(device.keys()),
+                            "ip_fields": {
+                                k: v
+                                for k, v in device.items()
+                                if "ip" in k.lower()
+                                or k in ("nickname", "hostname", "url")
+                            },
+                        }
+                    )
+        return {"matches": result}
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_LIST_RESERVATIONS,
+        async_list_reservations,
+        schema=LIST_RESERVATIONS_SCHEMA,
+        supports_response=SupportsResponse.ONLY,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_INSPECT_CLIENT,
+        async_inspect_client,
+        schema=INSPECT_CLIENT_SCHEMA,
+        supports_response=SupportsResponse.ONLY,
+    )
 
     for network in coordinator.data.networks:
         if network.id in conf_networks:

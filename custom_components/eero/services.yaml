@@ -10,3 +10,18 @@ set_blocked_apps:
     target_network:
       required: False
       example: My Network or 1234567    
+
+list_reservations:
+  fields:
+    target_network:
+      required: False
+      example: My Network or 1234567
+
+inspect_client:
+  fields:
+    mac:
+      required: True
+      example: "80:64:7c:e4:a0:8a"
+    target_network:
+      required: False
+      example: My Network or 1234567

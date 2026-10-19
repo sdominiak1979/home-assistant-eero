@@ -10,6 +10,7 @@ from .const import (
     DEVICE_CATEGORY_HOME,
     DEVICE_CATEGORY_OTHER,
     METHOD_DELETE,
+    METHOD_GET,
     METHOD_POST,
     METHOD_PUT,
     MODEL_BEACON,
@@ -949,3 +950,21 @@ class EeroNetwork(EeroResource):
     ]:
         """Resources."""
         return self.backup_networks + self.eeros + self.profiles + self.clients
+
+    # --- sdominiak1979 fork additions (read-only diagnostics) ---
+
+    @property
+    def url_reservations(self) -> str:
+        """Reservations URL (from network data if present, else conventional path)."""
+        res = self.data.get("reservations")
+        if isinstance(res, dict) and res.get("url"):
+            return res["url"]
+        return f"{self.url}/reservations"
+
+    def get_reservations(self):
+        """Read the DHCP reservations of this network (read-only)."""
+        return self.api.call(method=METHOD_GET, url=self.url_reservations)
+
+    def get_devices_raw(self):
+        """Read the raw client device list of this network (read-only)."""
+        return self.api.call(method=METHOD_GET, url=f"{self.url}/devices")
