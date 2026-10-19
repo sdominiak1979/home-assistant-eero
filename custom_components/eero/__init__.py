@@ -780,16 +780,30 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> b
                         "removed_at": dt_util.utcnow().isoformat()})
             archive[mac] = rec
             await archive_store.async_save(archive)
-            url = f"{network.url}/devices/{mac.replace(':', '')}"
+            # eero has no API (and no app option) to delete/forget a device.
+            # Instead unassign it from its profile, then read it back to verify.
+            url = f"/2.3/networks/{network.id}/devices/{mac.replace(':', '')}"
+            error = None
             try:
-                resp = await hass.async_add_executor_job(
-                    lambda: network.api.call(method="DELETE", url=url)
+                await hass.async_add_executor_job(
+                    lambda: network.api.call(method="PUT", url=url, json={"profile": None})
                 )
-                error = None
             except EeroException as err:
-                resp, error = None, str(err)
+                error = str(err)
+            after = None
+            try:
+                after = await hass.async_add_executor_job(
+                    lambda: network.api.call(method="GET", url=f"{network.url}/devices/{mac.replace(':', '')}")
+                )
+            except EeroException as err:
+                error = error or f"verify: {err}"
+            profile_after = (after or {}).get("profile") if isinstance(after, dict) else None
             result.append({"network": network.name, "mac": mac, "archived": rec,
-                           "error": error, "response": resp})
+                           "error": error,
+                           "blocked": (after or {}).get("blacklisted") if isinstance(after, dict) else None,
+                           "profile_after": profile_after,
+                           "unassigned": error is None and not profile_after})
+        await coordinator.async_request_refresh()
         return {"results": result}
 
     async def async_archive_lookup(service: ServiceCall) -> ServiceResponse:
