@@ -603,6 +603,21 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> b
             target_network=service.data[ATTR_TARGET_NETWORK]
         ):
             devices = await hass.async_add_executor_job(network.get_devices_raw)
+            if not any(
+                str(d.get("mac", "")).lower() == mac for d in devices or []
+            ):
+                # Not in the ~1-week /devices list: read the device record directly.
+                url = f"{network.url}/devices/{mac.replace(':', '')}"
+                try:
+                    detail = await hass.async_add_executor_job(
+                        lambda: network.api.call(method="GET", url=url)
+                    )
+                    devices = [detail] if isinstance(detail, dict) else []
+                    if devices and "mac" not in devices[0]:
+                        devices[0]["mac"] = mac
+                except EeroException as err:
+                    result.append({"network": network.name, "detail_url": url, "error": str(err)})
+                    devices = []
             for device in devices or []:
                 if str(device.get("mac", "")).lower() == mac:
                     result.append(
@@ -613,7 +628,8 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> b
                                 k: v
                                 for k, v in device.items()
                                 if "ip" in k.lower()
-                                or k in ("nickname", "hostname", "url")
+                                or k in ("nickname", "hostname", "url", "last_active",
+                                         "first_active", "connected", "profile")
                             },
                         }
                     )
