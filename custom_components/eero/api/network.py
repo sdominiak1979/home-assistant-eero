@@ -981,3 +981,31 @@ class EeroNetwork(EeroResource):
     def delete_reservation(self, url: str):
         """Delete a DHCP reservation by its URL (as returned by get_reservations)."""
         return self.api.call(method=METHOD_DELETE, url=url)
+
+    # --- sdominiak1979 fork additions (network map) ---
+
+    @property
+    def network_map(self) -> int:
+        """Number of connected clients (state of the network map sensor)."""
+        return self.connected_clients_count
+
+    @property
+    def network_map_clients(self) -> list[dict]:
+        """Compact table of connected clients: name, ip, mac, eero, band, signal."""
+        rows = []
+        for client in self.clients:
+            if not client.connected:
+                continue
+            freq, unit = client.interface_frequency
+            signal, _ = client.signal
+            rows.append(
+                {
+                    "name": client.name,
+                    "ip": client.ip,
+                    "mac": client.mac,
+                    "eero": client.source_location,
+                    "band": f"{freq} {unit}" if freq else ("wired" if client.wireless is False else None),
+                    "signal": signal,
+                }
+            )
+        return sorted(rows, key=lambda r: ((r["eero"] or ""), (r["name"] or "").lower()))

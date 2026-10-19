@@ -94,6 +94,8 @@ ATTR_MAC = "mac"
 ATTR_IP = "ip"
 ATTR_DESCRIPTION = "description"
 ATTR_URL = "url"
+ATTR_NICKNAME = "nickname"
+SERVICE_RENAME_CLIENT = "rename_client"
 SERVICE_CREATE_RESERVATION = "create_reservation"
 SERVICE_DELETE_RESERVATION = "delete_reservation"
 

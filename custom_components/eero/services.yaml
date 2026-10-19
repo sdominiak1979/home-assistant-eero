@@ -49,3 +49,15 @@ delete_reservation:
     target_network:
       required: False
       example: My Network or 1234567
+
+rename_client:
+  fields:
+    mac:
+      required: True
+      example: "80:64:7c:e4:a0:8a"
+    nickname:
+      required: True
+      example: Deck Light Controller
+    target_network:
+      required: False
+      example: My Network or 1234567

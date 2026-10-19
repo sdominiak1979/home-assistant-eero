@@ -87,6 +87,8 @@ from .const import (
     ATTR_IP,
     ATTR_DESCRIPTION,
     ATTR_URL,
+    ATTR_NICKNAME,
+    SERVICE_RENAME_CLIENT,
     SERVICE_CREATE_RESERVATION,
     SERVICE_DELETE_RESERVATION,
 )
@@ -122,6 +124,16 @@ CREATE_RESERVATION_SCHEMA = vol.Schema(
 DELETE_RESERVATION_SCHEMA = vol.Schema(
     {
         vol.Required(ATTR_URL): cv.string,
+        vol.Optional(ATTR_TARGET_NETWORK, default=[]): vol.All(
+            cv.ensure_list, [cv.string]
+        ),
+    }
+)
+
+RENAME_CLIENT_SCHEMA = vol.Schema(
+    {
+        vol.Required(ATTR_MAC): cv.string,
+        vol.Required(ATTR_NICKNAME): cv.string,
         vol.Optional(ATTR_TARGET_NETWORK, default=[]): vol.All(
             cv.ensure_list, [cv.string]
         ),
@@ -671,6 +683,38 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> b
         SERVICE_DELETE_RESERVATION,
         async_delete_reservation,
         schema=DELETE_RESERVATION_SCHEMA,
+        supports_response=SupportsResponse.ONLY,
+    )
+
+    async def async_rename_client(service: ServiceCall) -> ServiceResponse:
+        mac = service.data[ATTR_MAC].lower().replace("-", ":")
+        result = []
+        for network in _validate_network(
+            target_network=service.data[ATTR_TARGET_NETWORK]
+        ):
+            for client in network.clients:
+                if str(client.mac).lower() != mac:
+                    continue
+                old = client.nickname
+                try:
+                    await hass.async_add_executor_job(
+                        client.set_nickname, service.data[ATTR_NICKNAME]
+                    )
+                    error = None
+                except EeroException as err:
+                    error = str(err)
+                result.append(
+                    {"network": network.name, "mac": mac, "old_nickname": old,
+                     "new_nickname": service.data[ATTR_NICKNAME], "error": error}
+                )
+        await coordinator.async_request_refresh()
+        return {"results": result}
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_RENAME_CLIENT,
+        async_rename_client,
+        schema=RENAME_CLIENT_SCHEMA,
         supports_response=SupportsResponse.ONLY,
     )
 

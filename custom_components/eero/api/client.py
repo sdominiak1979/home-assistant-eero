@@ -272,6 +272,14 @@ class EeroClient(EeroResource):
         """Nickname."""
         return self.data.get("nickname")
 
+    def set_nickname(self, value: str) -> None:
+        """Rename this client in eero (sdominiak1979 fork)."""
+        self.api.call(
+            method=METHOD_PUT,
+            url=f"/2.3/networks/{self.network.id}/devices/{self.mac}",
+            json={"nickname": value},
+        )
+
     @property
     def paused(self) -> bool | None:
         """Paused."""

@@ -146,6 +146,12 @@ SENSOR_DESCRIPTIONS: list[EeroSensorEntityDescription] = [
         native_unit_of_measurement="clients",
     ),
     EeroSensorEntityDescription(
+        key="network_map",
+        name="Network Map",
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement="clients",
+    ),
+    EeroSensorEntityDescription(
         key="connected_guest_clients_count",
         name="Connected Guest Clients",
         state_class=SensorStateClass.MEASUREMENT,
@@ -465,6 +471,8 @@ class EeroSensorEntity(EeroEntity, SensorEntity):
                 attr = f"{self.entity_description.key}_{category}"
                 if hasattr(self.resource, attr):
                     attrs[category] = getattr(self.resource, attr)
+        if self.entity_description.key == "network_map":
+            attrs["clients"] = self.resource.network_map_clients
         if self.entity_description.key == "status" and self.resource.is_backup_network:
             attrs["checked"] = self.resource.checked
             if all(
