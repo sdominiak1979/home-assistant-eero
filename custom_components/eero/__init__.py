@@ -20,6 +20,8 @@ from homeassistant.helpers import (
     entity_registry as er,
 )
 from homeassistant.helpers.entity import EntityDescription
+from homeassistant.helpers.storage import Store
+from homeassistant.util import dt as dt_util
 from homeassistant.helpers.update_coordinator import (
     CoordinatorEntity,
     DataUpdateCoordinator,
@@ -88,6 +90,9 @@ from .const import (
     ATTR_DESCRIPTION,
     ATTR_URL,
     ATTR_NICKNAME,
+    SERVICE_REMOVE_CLIENT,
+    SERVICE_ARCHIVE_LOOKUP,
+    SERVICE_RESTORE_CLIENT,
     SERVICE_RENAME_CLIENT,
     SERVICE_CREATE_RESERVATION,
     SERVICE_DELETE_RESERVATION,
@@ -134,6 +139,15 @@ RENAME_CLIENT_SCHEMA = vol.Schema(
     {
         vol.Required(ATTR_MAC): cv.string,
         vol.Required(ATTR_NICKNAME): cv.string,
+        vol.Optional(ATTR_TARGET_NETWORK, default=[]): vol.All(
+            cv.ensure_list, [cv.string]
+        ),
+    }
+)
+
+MAC_SCHEMA = vol.Schema(
+    {
+        vol.Required(ATTR_MAC): cv.string,
         vol.Optional(ATTR_TARGET_NETWORK, default=[]): vol.All(
             cv.ensure_list, [cv.string]
         ),
@@ -733,6 +747,91 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> b
         schema=RENAME_CLIENT_SCHEMA,
         supports_response=SupportsResponse.ONLY,
     )
+
+    # --- sdominiak1979 fork: remove / archive / restore clients ---
+    archive_store = Store(hass, 1, f"eero_archive_{config_entry.entry_id}")
+    archive = await archive_store.async_load() or {}
+
+    def _find_client_record(network, mac):
+        """Name/profile/nickname for a MAC from the network and profile device lists."""
+        rec = None
+        for client in network.clients:
+            if str(client.mac).lower() == mac:
+                rec = {"name": client.name, "nickname": client.nickname}
+        for profile in network.profiles:
+            for client in profile.clients:
+                if str(client.mac).lower() == mac:
+                    rec = rec or {"name": client.name, "nickname": client.nickname}
+                    rec["profile"] = profile.name
+                    rec["profile_url"] = profile.data.get("url")
+        return rec
+
+    async def async_remove_client(service: ServiceCall) -> ServiceResponse:
+        mac = service.data[ATTR_MAC].lower().replace("-", ":")
+        result = []
+        for network in _validate_network(
+            target_network=service.data[ATTR_TARGET_NETWORK]
+        ):
+            if any(str(c.mac).lower() == mac and c.connected for c in network.clients):
+                result.append({"network": network.name, "mac": mac, "error": "connected - not removed"})
+                continue
+            rec = _find_client_record(network, mac) or {}
+            rec.update({"mac": mac, "network": network.name,
+                        "removed_at": dt_util.utcnow().isoformat()})
+            archive[mac] = rec
+            await archive_store.async_save(archive)
+            url = f"{network.url}/devices/{mac.replace(':', '')}"
+            try:
+                resp = await hass.async_add_executor_job(
+                    lambda: network.api.call(method="DELETE", url=url)
+                )
+                error = None
+            except EeroException as err:
+                resp, error = None, str(err)
+            result.append({"network": network.name, "mac": mac, "archived": rec,
+                           "error": error, "response": resp})
+        return {"results": result}
+
+    async def async_archive_lookup(service: ServiceCall) -> ServiceResponse:
+        mac = service.data[ATTR_MAC].lower().replace("-", ":")
+        return {"mac": mac, "record": archive.get(mac)}
+
+    async def async_restore_client(service: ServiceCall) -> ServiceResponse:
+        mac = service.data[ATTR_MAC].lower().replace("-", ":")
+        rec = archive.get(mac)
+        if not rec:
+            return {"mac": mac, "error": "not in archive"}
+        result = {"mac": mac, "record": rec, "steps": []}
+        for network in _validate_network(
+            target_network=service.data[ATTR_TARGET_NETWORK]
+        ):
+            url = f"/2.3/networks/{network.id}/devices/{mac.replace(':', '')}"
+            payload = {}
+            if rec.get("nickname"):
+                payload["nickname"] = rec["nickname"]
+            if rec.get("profile_url"):
+                payload["profile"] = rec["profile_url"]
+            if not payload:
+                continue
+            try:
+                await hass.async_add_executor_job(
+                    lambda: network.api.call(method="PUT", url=url, json=payload)
+                )
+                result["steps"].append({"network": network.name, "sent": payload})
+            except EeroException as err:
+                result["steps"].append({"network": network.name, "error": str(err)})
+        await coordinator.async_request_refresh()
+        return result
+
+    for name, func in (
+        (SERVICE_REMOVE_CLIENT, async_remove_client),
+        (SERVICE_ARCHIVE_LOOKUP, async_archive_lookup),
+        (SERVICE_RESTORE_CLIENT, async_restore_client),
+    ):
+        hass.services.async_register(
+            DOMAIN, name, func, schema=MAC_SCHEMA,
+            supports_response=SupportsResponse.ONLY,
+        )
 
     for network in coordinator.data.networks:
         if network.id in conf_networks:

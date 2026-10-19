@@ -61,3 +61,30 @@ rename_client:
     target_network:
       required: False
       example: My Network or 1234567
+
+remove_client:
+  fields:
+    mac:
+      required: True
+      example: "aa:bb:cc:dd:ee:ff"
+    target_network:
+      required: False
+      example: My Network or 1234567
+
+archive_lookup:
+  fields:
+    mac:
+      required: True
+      example: "aa:bb:cc:dd:ee:ff"
+    target_network:
+      required: False
+      example: My Network or 1234567
+
+restore_client:
+  fields:
+    mac:
+      required: True
+      example: "aa:bb:cc:dd:ee:ff"
+    target_network:
+      required: False
+      example: My Network or 1234567
