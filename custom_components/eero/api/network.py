@@ -1009,3 +1009,23 @@ class EeroNetwork(EeroResource):
                 }
             )
         return sorted(rows, key=lambda r: ((r["eero"] or ""), (r["name"] or "").lower()))
+
+    @property
+    def network_map_offline(self) -> list[dict]:
+        """Known but not-connected clients, most recently seen first (capped at 200)."""
+        rows = []
+        for client in self.clients:
+            if client.connected:
+                continue
+            last = client.last_active
+            rows.append(
+                {
+                    "name": client.name,
+                    "ip": client.ip,
+                    "mac": client.mac,
+                    "eero": client.source_location,
+                    "last_seen": last.isoformat() if last else None,
+                }
+            )
+        rows.sort(key=lambda r: r["last_seen"] or "", reverse=True)
+        return rows[:200]
