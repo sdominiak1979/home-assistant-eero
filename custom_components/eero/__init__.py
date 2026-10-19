@@ -789,41 +789,51 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> b
             rec = _find_client_record(network, mac) or {}
             rec.update({"mac": mac, "network": network.name,
                         "removed_at": dt_util.utcnow().isoformat()})
+            prev = archive.get(mac) or {}
+            if prev.get("profile_url") and not (rec.get("profile_url") and rec.get("profile") != "Unassigned"):
+                rec = prev  # don't overwrite a good record with an already-unassigned one
             archive[mac] = rec
             await archive_store.async_save(archive)
-            # eero has no API (and no app option) to delete/forget a device.
-            # Instead unassign it from its profile, then read it back to verify.
-            # "Unassigned" is a real eero profile (that's what the app does).
-            unassigned = next((p.data.get("url") for p in network.profiles
-                               if p.name == "Unassigned"), None)
-            if not unassigned:
-                profiles = await hass.async_add_executor_job(
-                    lambda: network.api.call(method="GET", url=f"{network.url}/profiles")
-                )
-                unassigned = next((p.get("url") for p in (profiles or [])
-                                   if p.get("name") == "Unassigned"), None)
-            url = f"{network.url}/devices/{mac.replace(':', '')}"
-            error = None if unassigned else "no Unassigned profile found"
+            # eero has no delete/forget API. What the app does is take the device off
+            # its profile's device list; it then falls back to the default
+            # "Unassigned" profile. (Assigning to "Unassigned" directly is rejected:
+            # error.default_profile.invalid_assignment.)
+            dev_url = f"{network.url}/devices/{mac.replace(':', '')}"
+            error, blocked, profile_after = None, None, None
             try:
-                if unassigned:
-                    await hass.async_add_executor_job(
-                        lambda: network.api.call(method="PUT", url=url, json={"profile": unassigned})
-                    )
+                dev = await hass.async_add_executor_job(
+                    lambda: network.api.call(method="GET", url=dev_url)
+                ) or {}
+                blocked = dev.get("blacklisted")
+                prof = dev.get("profile") or {}
+                if blocked:
+                    error = "blocked - left as is"
+                elif prof.get("url") and prof.get("name") != "Unassigned":
+                    pdata = await hass.async_add_executor_job(
+                        lambda: network.api.call(method="GET", url=prof["url"])
+                    ) or {}
+                    if pdata.get("default"):
+                        error = "profile is the default profile"
+                    else:
+                        keep = [{"url": d["url"]} for d in pdata.get("devices", [])
+                                if str(d.get("mac", "")).lower() != mac]
+                        if len(keep) != len(pdata.get("devices", [])) - 1:
+                            error = "device not found in its profile list - nothing sent"
+                        else:
+                            await hass.async_add_executor_job(
+                                lambda: network.api.call(method="PUT", url=prof["url"],
+                                                         json={"devices": keep})
+                            )
+                after = await hass.async_add_executor_job(
+                    lambda: network.api.call(method="GET", url=dev_url)
+                ) or {}
+                profile_after = (after.get("profile") or {}).get("name")
             except EeroException as err:
                 error = str(err)
-            after = None
-            try:
-                after = await hass.async_add_executor_job(
-                    lambda: network.api.call(method="GET", url=f"{network.url}/devices/{mac.replace(':', '')}")
-                )
-            except EeroException as err:
-                error = error or f"verify: {err}"
-            profile_after = (after or {}).get("profile") if isinstance(after, dict) else None
             result.append({"network": network.name, "mac": mac, "archived": rec,
-                           "error": error,
-                           "blocked": (after or {}).get("blacklisted") if isinstance(after, dict) else None,
+                           "error": error, "blocked": blocked,
                            "profile_after": profile_after,
-                           "unassigned": error is None and (profile_after or {}).get("name") == "Unassigned"})
+                           "unassigned": profile_after == "Unassigned"})
         await coordinator.async_request_refresh()
         return {"results": result}
 
@@ -840,19 +850,31 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> b
         for network in _validate_network(
             target_network=service.data[ATTR_TARGET_NETWORK]
         ):
-            url = f"/2.3/networks/{network.id}/devices/{mac.replace(':', '')}"
-            payload = {}
-            if rec.get("nickname"):
-                payload["nickname"] = rec["nickname"]
-            if rec.get("profile_url"):
-                payload["profile"] = rec["profile_url"]
-            if not payload:
-                continue
+            dev_url = f"{network.url}/devices/{mac.replace(':', '')}"
             try:
-                await hass.async_add_executor_job(
-                    lambda: network.api.call(method="PUT", url=url, json=payload)
-                )
-                result["steps"].append({"network": network.name, "sent": payload})
+                if rec.get("nickname"):
+                    await hass.async_add_executor_job(
+                        lambda: network.api.call(method="PUT", url=f"/2.3/networks/{network.id}/devices/{mac.replace(':', '')}",
+                                                 json={"nickname": rec["nickname"]})
+                    )
+                    result["steps"].append({"network": network.name, "nickname": rec["nickname"]})
+                if rec.get("profile_url"):
+                    # Profiles are assigned by adding the device to the profile's list.
+                    pdata = await hass.async_add_executor_job(
+                        lambda: network.api.call(method="GET", url=rec["profile_url"])
+                    ) or {}
+                    devs = [{"url": d["url"]} for d in pdata.get("devices", [])]
+                    if not any(d["url"] == dev_url for d in devs):
+                        devs.append({"url": dev_url})
+                        await hass.async_add_executor_job(
+                            lambda: network.api.call(method="PUT", url=rec["profile_url"],
+                                                     json={"devices": devs})
+                        )
+                    after = await hass.async_add_executor_job(
+                        lambda: network.api.call(method="GET", url=dev_url)
+                    ) or {}
+                    result["steps"].append({"network": network.name,
+                                            "profile_after": (after.get("profile") or {}).get("name")})
             except EeroException as err:
                 result["steps"].append({"network": network.name, "error": str(err)})
         await coordinator.async_request_refresh()
