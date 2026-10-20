@@ -1006,9 +1006,34 @@ class EeroNetwork(EeroResource):
                     "eero": client.source_location,
                     "band": f"{freq} {unit}" if freq else ("wired" if client.wireless is False else None),
                     "signal": signal,
+                    "profile": (client.data.get("profile") or {}).get("name"),
+                    "type": client.data.get("device_type"),
                 }
             )
         return sorted(rows, key=lambda r: ((r["eero"] or ""), (r["name"] or "").lower()))
+
+    @property
+    def network_map_eeros(self) -> list[dict]:
+        """The eero nodes themselves (sdominiak1979 fork): for drawing the mesh."""
+        rows = []
+        for eero in self.eeros:
+            if eero is None:
+                continue
+            d = eero.data
+            rows.append(
+                {
+                    "name": d.get("location"),
+                    "model": d.get("model"),
+                    "gateway": bool(d.get("gateway")),
+                    "status": d.get("status"),
+                    "wired": d.get("wired"),
+                    "connection": d.get("connection_type"),
+                    "mesh_bars": d.get("mesh_quality_bars"),
+                    "clients": d.get("connected_clients_count"),
+                    "ip": d.get("ip_address"),
+                }
+            )
+        return sorted(rows, key=lambda r: (not r["gateway"], r["name"] or ""))
 
     @property
     def network_map_offline(self) -> list[dict]:

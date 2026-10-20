@@ -473,6 +473,7 @@ class EeroSensorEntity(EeroEntity, SensorEntity):
                     attrs[category] = getattr(self.resource, attr)
         if self.entity_description.key == "network_map":
             attrs["clients"] = self.resource.network_map_clients
+            attrs["eeros"] = self.resource.network_map_eeros
             offline = self.resource.network_map_offline
             attrs["offline_count"] = len(offline)
             attrs["offline_clients"] = offline
