@@ -887,8 +887,11 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> b
             target_network=service.data[ATTR_TARGET_NETWORK]
         ):
             path = service.data["path"]
-            if f"/networks/{network.id}/" not in path + "/":
-                out.append({"network": network.name, "error": "path must be inside this network"})
+            eero_urls = {(e.data or {}).get("url") for e in network.eeros if e is not None}
+            if f"/networks/{network.id}/" not in path + "/" and not (
+                service.data["method"] in ("GET", "PUT") and path in eero_urls
+            ):
+                out.append({"network": network.name, "error": "path must be inside this network (or one of its eeros)"})
                 continue
             if service.data["method"] == "DELETE" and f"/networks/{network.id}/blacklist/" not in path:
                 out.append({"network": network.name, "error": "DELETE only allowed on blacklist entries"})
