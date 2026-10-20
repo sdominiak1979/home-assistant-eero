@@ -1031,6 +1031,9 @@ class EeroNetwork(EeroResource):
                     "mesh_bars": d.get("mesh_quality_bars"),
                     "clients": d.get("connected_clients_count"),
                     "ip": d.get("ip_address"),
+                    "wan": bool(d.get("using_wan")),
+                    "upstream": (d.get("wireless_upstream_node") or {}).get("name"),
+                    "mesh_radio": (d.get("wireless_upstream_node") or {}).get("primary_mesh_radio"),
                 }
             )
         return sorted(rows, key=lambda r: (not r["gateway"], r["name"] or ""))
